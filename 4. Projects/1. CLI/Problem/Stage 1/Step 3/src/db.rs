@@ -1,6 +1,6 @@
 use std::fs;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use crate::models::{DBState, Epic, Story, Status};
 
@@ -10,27 +10,117 @@ pub struct JiraDatabase {
 
 impl JiraDatabase {
     pub fn new(file_path: String) -> Self {
-        todo!()
+        Self {
+            database: Box::new(JSONFileDatabase {
+                file_path: file_path.to_owned()
+            })
+        }
     }
 
     pub fn read_db(&self) -> Result<DBState> {
-        todo!()
+        let db_content = self.database.read_db()?;
+        Ok(db_content)
     }
     
     pub fn create_epic(&self, epic: Epic) -> Result<u32> {
-        todo!()
+        let mut dbstate = self.read_db()?;
+
+        // Increment key
+        let last_id = dbstate.last_item_id;
+        let new_id = last_id + 1;
+        dbstate.last_item_id = new_id;
+
+        // Insert the epic
+        dbstate.epics.insert(new_id, epic);
+
+        // Write changes
+        self.database.write_db(&dbstate)?;
+
+        // Return item's key
+        Ok(new_id)
     }
     
     pub fn create_story(&self, story: Story, epic_id: u32) -> Result<u32> {
-        todo!()
+        let mut dbstate = self.read_db()?;
+
+        // Validate foreign key (valid epic)
+        if !dbstate.epics.contains_key(&epic_id) {
+            return Err(anyhow!("Epic with ID {} does not exist.", epic_id));
+        }
+
+        // Increment key
+        let last_id = dbstate.last_item_id;
+        let new_id = last_id + 1;
+        dbstate.last_item_id = new_id;
+
+        // Insert the story
+        dbstate.stories.insert(new_id, story);
+
+        // Add the story to the epic
+        if let Some(epic) = dbstate.epics.get_mut(&epic_id) {
+            (*epic).stories.push(new_id);
+        }
+
+        // Write changes
+        self.database.write_db(&dbstate)?;
+
+        // Return item's key
+        Ok(new_id)
     }
     
     pub fn delete_epic(&self, epic_id: u32) -> Result<()> {
-        todo!()
+        let mut dbstate = self.read_db()?;
+
+        // Validate the key (valid epic)
+        if !dbstate.epics.contains_key(&epic_id) {
+            return Err(anyhow!("Epic with ID {} does not exist.", epic_id));
+        }
+
+        // Remove the related stories
+        if let Some(epic) = dbstate.epics.get(&epic_id) {
+            for story_id in (*epic).stories.iter() {
+                dbstate.stories.remove(&story_id);
+            }
+        }
+
+        // Remove the epic
+        let epic = dbstate.epics.remove(&epic_id);
+
+        // Write changes
+        self.database.write_db(&dbstate)?;
+
+        // Yay~
+        Ok(())
     }
     
     pub fn delete_story(&self,epic_id: u32, story_id: u32) -> Result<()> {
-        todo!()
+        let mut dbstate = self.read_db()?;
+
+        // Validate story ID
+        if !dbstate.stories.contains_key(&story_id) {
+            return Err(anyhow!("Story with ID {} does not exist.", story_id));
+        }
+
+        // Validate story ID
+        if !dbstate.epics.contains_key(&epic_id) {
+            return Err(anyhow!("Epic with ID {} does not exist.", epic_id));
+        }
+
+        // Remove the story's foreign key from the epic
+        if let Some(epic) = dbstate.epics.get_mut(&epic_id) {
+            if let Some(story_index) = (*epic).stories.iter().rposition(|&id| id == story_id) {
+                (*epic).stories.swap_remove(story_index);
+            }
+        }
+
+        // Remove the story
+        dbstate.stories.remove(&story_id);
+
+        // Write changes
+        self.database.write_db(&dbstate)?;
+
+        // Yes.
+        Ok(())
     }
     
     pub fn update_epic_status(&self, epic_id: u32, status: Status) -> Result<()> {
